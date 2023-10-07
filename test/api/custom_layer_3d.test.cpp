@@ -5,10 +5,12 @@
 #include <mbgl/gl/defines.hpp>
 #include <mbgl/map/map.hpp>
 #include <mbgl/map/map_options.hpp>
+#include <mbgl/map/transform.hpp>
 #include <mbgl/platform/gl_functions.hpp>
 #include <mbgl/storage/resource_options.hpp>
 #include <mbgl/style/layers/fill_layer.hpp>
 #include <mbgl/style/style.hpp>
+#include <mbgl/util/camera.hpp>
 #include <mbgl/util/io.hpp>
 #include <mbgl/util/mat4.hpp>
 #include <mbgl/util/run_loop.hpp>
@@ -23,10 +25,14 @@ using namespace mbgl::platform;
 static const GLchar* vertexShaderSource = R"MBGL_SHADER(
 attribute vec3 position;
 attribute vec3 normal;
-uniform mat4 Pmatrix;
+uniform mat4 modelMatrix;
+uniform mat4 projectionMatrix;
 varying vec4 vertexColor;
 void main() {
-    gl_Position = vec4(position.xy, 1, 1);
+    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+    vec4 projected = projectionMatrix * worldPos;
+    gl_Position = projected;
+    //gl_Position = vec4(worldPos.xy, 1, 1);
     vertexColor = vec4(0.5 * normal + 0.5, 1);
 }
 )MBGL_SHADER";
@@ -41,6 +47,23 @@ void main() {
 // Not using any mbgl-specific stuff (other than a basic error-checking macro) in the
 // layer implementation because it is intended to reflect how someone using custom layers
 // might actually write their own implementation.
+
+void dumpMatrix(const std::string& name, const GLfloat* m) {
+  std::cout << name << ": " << std::endl;
+  std::cout << m[0] << ", " << m[1] << ", " << m[2] << ", " << m[3] << std::endl;
+  std::cout << m[4] << ", " << m[5] << ", " << m[6] << ", " << m[7] << std::endl;
+  std::cout << m[8] << ", " << m[9] << ", " << m[10] << ", " << m[11] << std::endl;
+  std::cout << m[12] << ", " << m[13] << ", " << m[14] << ", " << m[15] << std::endl;
+}
+
+void debugDepthBuffer() {
+  GLfloat depthBuffer[256 * 256];
+  MBGL_CHECK_ERROR(glReadPixels(0, 0, 256, 256, GL_DEPTH_COMPONENT, GL_FLOAT, depthBuffer));
+  float sum = 0;
+  for (int i = 0; i < 256 * 256; i++) sum += depthBuffer[i];
+  sum /= 256 * 256;
+  std::cout << "depth buffer avg: " << sum << std::endl;
+}
 
 class Test3DLayer : public mbgl::style::CustomLayerHost {
 public:
@@ -58,6 +81,8 @@ public:
         MBGL_CHECK_ERROR(glLinkProgram(program));
         a_position = MBGL_CHECK_ERROR(glGetAttribLocation(program, "position"));
         a_normal = MBGL_CHECK_ERROR(glGetAttribLocation(program, "normal"));
+        u_projectionMatrix = MBGL_CHECK_ERROR(glGetUniformLocation(program, "projectionMatrix"));
+        u_modelMatrix = MBGL_CHECK_ERROR(glGetUniformLocation(program, "modelMatrix"));
         stride = 6 * sizeof(GLfloat); // position + normal
         GLuint buffers[2];
         MBGL_CHECK_ERROR(glGenBuffers(2, buffers));
@@ -65,16 +90,50 @@ public:
         indexBuffer = buffers[1];
     }
 
-    void render(const mbgl::style::CustomLayerRenderParameters&) override {
+    void render(const mbgl::style::CustomLayerRenderParameters& param) override {
         GLfloat vertexData[] = {
           -0.5, -0.5, 0.5, 0, 0, 1.0,
           -0.5, 0.5, 0.5, 0, 0, 1.0,
           0.5, -0.5, 0.5, 0, 0, 1.0,
-          0.5, 0.5, 0.5, 0, 0, 1.0
+          0.5, 0.5, 0.5, 0, 0, 1.0,
+          -0.5, -0.5, -0.5, -1.0, 0, 0,
+          -0.5, -0.5, 0.5, -1.0, 0, 0,
+          -0.5, 0.5, -0.5, -1.0, 0, 0,
+          -0.5, 0.5, 0.5, -1.0, 0, 0,
+          0.5, -0.5, -0.5, 1.0, 0, 0,
+          0.5, -0.5, 0.5, 1.0, 0, 0,
+          0.5, 0.5, -0.5, 1.0, 0, 0,
+          0.5, 0.5, 0.5, 1.0, 0, 0,
+          -0.5, 0.5, -0.5, 0, 1.0, 0,
+          -0.5, 0.5, 0.5, 0, 1.0, 0,
+          0.5, 0.5, -0.5, 0, 1.0, 0,
+          0.5, 0.5, 0.5, 0, 1.0, 0
         };
-        GLuint faces[] = {0, 1, 2, 1, 2, 3};
+        GLuint faces[] = {0, 1, 2, 1, 2, 3, 4, 5, 6, 5, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13, 14, 13, 14, 15};
         GLsizei indexCount = sizeof(faces) / sizeof(GLuint);
+        // convert the double precision matrix to GLfloats
+        // it's called projection, but I think it's the ProjView (P*V) matrix, because
+        // the last column appears translated: [-521467, 347073, 67456.5, 67178.1]
+        GLfloat pmatrix[16];
+        for (int i = 0; i < 16; i++) {
+          pmatrix[i] = static_cast<GLfloat>(param.projectionMatrix[i]);
+        }
+        dumpMatrix("projectionMatrix", pmatrix);
+        GLfloat scale[] {1, 1, 10};
+        GLfloat mmatrix[] = {
+          scale[0], 0, 0, 0,
+          0, scale[1], 0, 0,
+          0, 0, scale[2], 0,
+          37.8, -122.5, 0, 1
+        };
+        dumpMatrix("model matrix", mmatrix);
         MBGL_CHECK_ERROR(glUseProgram(program));
+        MBGL_CHECK_ERROR(glEnable(GL_DEPTH_TEST));
+        MBGL_CHECK_ERROR(glDisable(GL_CULL_FACE)); // for the time being, render back faces as well
+        MBGL_CHECK_ERROR(glDisable(GL_STENCIL_TEST));
+        MBGL_CHECK_ERROR(glDisable(GL_BLEND));
+        MBGL_CHECK_ERROR(glUniformMatrix4fv(u_projectionMatrix, 1, false, pmatrix));
+        MBGL_CHECK_ERROR(glUniformMatrix4fv(u_modelMatrix, 1, false, mmatrix));
         // and here we could loop if we had more meshes
         MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
         std::cout << "vertexDataSize: " << sizeof(vertexData) << ", indexBuffer: " << sizeof(faces) << ", indexCount: " << indexCount << std::endl;
@@ -89,6 +148,7 @@ public:
         MBGL_CHECK_ERROR(glVertexAttribPointer(a_normal, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(3 * sizeof(GLfloat))));
         // draw
         MBGL_CHECK_ERROR(glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, nullptr));
+        debugDepthBuffer();
     }
 
     void contextLost() override {}
@@ -113,7 +173,18 @@ public:
     GLuint a_position = 0;
     GLuint a_normal = 0;
     GLsizei stride = 0;
+    GLint u_projectionMatrix = 0;
+    GLint u_modelMatrix = 0;
 };
+
+void AlmostEqual(double a, double b, double epsilon) {
+  ASSERT_LE(std::abs(a - b), epsilon);
+}
+
+void AlmostEqual(const LatLng& a, const LatLng& b, double epsilon) {
+  AlmostEqual(a.latitude(), b.latitude(), epsilon);
+  AlmostEqual(a.longitude(), b.longitude(), epsilon);
+}
 
 TEST(CustomLayer, Object) {
     if (gfx::Backend::GetType() != gfx::Backend::Type::OpenGL) {
@@ -123,11 +194,39 @@ TEST(CustomLayer, Object) {
     util::RunLoop loop;
 
     HeadlessFrontend frontend { 1 };
+    auto size = frontend.getSize();
+    // 256x256
+    std::cout << "size: " << size.width << "x" << size.height << std::endl;
     Map map(frontend, MapObserver::nullObserver(),
-            MapOptions().withMapMode(MapMode::Static).withSize(frontend.getSize()),
+            MapOptions().withMapMode(MapMode::Static).withSize(size),
             ResourceOptions().withCachePath(":memory:").withAssetPath("test/fixtures/api/assets"));
     map.getStyle().loadJSON(util::read_file("test/fixtures/api/water.json"));
-    map.jumpTo(CameraOptions().withCenter(LatLng { 37.8, -122.5 }).withZoom(10.0));
+    LatLng ll(37.8, -122.5);
+    auto cam = CameraOptions().withCenter(ll).withZoom(10.0).withPitch(30).withBearing(30);
+
+    // Understanding transforms
+    Transform transform;
+    transform.resize({1, 1});
+    transform.jumpTo(cam);
+    AlmostEqual(ll, transform.getLatLng(), 0.1);
+
+    map.jumpTo(cam);
+
+    // understanding conversions
+    auto sc = map.pixelForLatLng(ll);
+    ASSERT_EQ(size.width / 2, static_cast<uint32_t>(sc.x));
+    ASSERT_EQ(size.height / 2, static_cast<uint32_t>(sc.y));
+    auto mid_ll = map.latLngForPixel({static_cast<double>(size.width / 2), static_cast<double>(size.height / 2)});
+    AlmostEqual(ll, mid_ll, 0.1);
+    
+    std::array<float, 3> spherical{{ 2, 37.8, -122.5 }};
+    Position position(spherical);
+    auto cartesian = position.getCartesian();
+    std::cout << "cartesian: " << cartesian[0] << ", " << cartesian[1] << ", " << cartesian[2] << std::endl;
+    //auto merca = util::toMercator(ll, 10.0);
+    //std::cout << "mercator: " << merca[0] << ", " << merca[1] << ", " << merca[2] << std::endl;
+    //  0.159722, 0.382893, 3.20185e-07
+
     map.getStyle().addLayer(std::make_unique<CustomLayer>(
         "custom",
         std::make_unique<Test3DLayer>()));
