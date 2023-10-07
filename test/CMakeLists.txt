@@ -124,6 +124,7 @@ if(MBGL_WITH_OPENGL)
         mbgl-test
         PRIVATE
             ${PROJECT_SOURCE_DIR}/test/api/custom_layer.test.cpp
+            ${PROJECT_SOURCE_DIR}/test/api/custom_layer_3d.test.cpp
             ${PROJECT_SOURCE_DIR}/test/gl/bucket.test.cpp
             ${PROJECT_SOURCE_DIR}/test/gl/context.test.cpp
             ${PROJECT_SOURCE_DIR}/test/gl/gl_functions.test.cpp
