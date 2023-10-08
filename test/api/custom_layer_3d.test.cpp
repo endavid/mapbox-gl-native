@@ -7,6 +7,7 @@
 #include <mbgl/map/map_options.hpp>
 #include <mbgl/map/transform.hpp>
 #include <mbgl/platform/gl_functions.hpp>
+#include <mbgl/storage/file_source.hpp>
 #include <mbgl/storage/resource_options.hpp>
 #include <mbgl/style/layers/fill_layer.hpp>
 #include <mbgl/style/style.hpp>
@@ -14,6 +15,9 @@
 #include <mbgl/util/io.hpp>
 #include <mbgl/util/mat4.hpp>
 #include <mbgl/util/run_loop.hpp>
+
+#include <rapidjson/document.h>
+#include <rapidjson/error/en.h>
 
 using namespace mbgl;
 using namespace mbgl::style;
@@ -65,8 +69,116 @@ void debugDepthBuffer() {
   std::cout << "depth buffer avg: " << sum << std::endl;
 }
 
+template<typename T>
+std::unique_ptr<T[]> make_unique_array(std::initializer_list<T> values) {
+    auto result = std::make_unique<T[]>(values.size());
+    std::copy(values.begin(), values.end(), result.get());
+    return result;
+}
+
+class Model3D {
+  public:
+  Model3D(const std::string& json)
+  : name("")
+  , position({0, 0, 0})
+  , scale({0, 0, 0})
+  , vertexByteCount(0)
+  , indexByteCount(0)
+  , indexCount(0)
+  , vertexData(nullptr)
+  , faces(nullptr)
+  , modelMatrix(nullptr)
+  {
+    rapidjson::GenericDocument<rapidjson::UTF8<>, rapidjson::CrtAllocator> doc;
+    doc.Parse<0>(json.c_str());
+    if (doc.HasParseError()) {
+       throw std::runtime_error("Error parsing model file");
+    }
+    name = doc["name"].GetString();
+    const auto& pos = doc["position"].GetArray();
+    const auto& s = doc["scale"].GetArray();
+    const auto& dataArrays = doc["dataArrays"].GetObject();
+    const auto& positionArray = dataArrays["position"].GetArray();
+    const auto& normalArray = dataArrays["normal"].GetArray();
+    const auto& meshes = doc["meshes"].GetArray();
+    // assuming there's only one mesh
+    const auto& indices = meshes[0]["indices"].GetArray();
+    if (positionArray.Size() != normalArray.Size()) {
+      throw std::runtime_error("There should be as many normals as vertex positions -- the data should be interleaved.");
+    }
+    for (size_t i = 0; i < 3; i++) {
+      position[i] = pos[i].GetDouble();
+      scale[i] = s[i].GetDouble();
+    }
+    modelMatrix = make_unique_array<GLfloat>({
+      static_cast<GLfloat>(scale[0]), 0, 0, 0,
+      0, static_cast<GLfloat>(scale[0]), 0, 0,
+      0, 0, static_cast<GLfloat>(scale[0]), 0,
+      static_cast<GLfloat>(position[0]),
+      static_cast<GLfloat>(position[1]),
+      static_cast<GLfloat>(position[2]),
+      1
+    });
+    size_t vertexCount = positionArray.Size() / 3;
+    vertexData = std::make_unique<GLfloat[]>(6 * vertexCount);
+    vertexByteCount = sizeof(GLfloat) * 6 * vertexCount;
+    // interleave the data
+    for (size_t i = 0; i < vertexCount; i++) {
+      vertexData[6 * i] = positionArray[3 * i].GetFloat();
+      vertexData[6 * i + 1] = positionArray[3 * i + 1].GetFloat();
+      vertexData[6 * i + 2] = positionArray[3 * i + 2].GetFloat();
+      vertexData[6 * i + 3] = normalArray[3 * i].GetFloat();
+      vertexData[6 * i + 4] = normalArray[3 * i + 1].GetFloat();
+      vertexData[6 * i + 5] = normalArray[3 * i + 2].GetFloat();
+    }
+    indexCount = indices.Size();
+    indexByteCount = indexCount * sizeof(GLuint);
+    faces = std::make_unique<GLuint[]>(indices.Size());
+    for (size_t i = 0; i < indices.Size(); i++) {
+      faces[i] = indices[i].GetUint();
+    }
+  }
+  const std::string& getName() const {
+    return name;
+  }
+  GLsizei getVertexByteCount() const {
+    return vertexByteCount;
+  }
+  GLsizei getIndexByteCount() const {
+    return indexByteCount;
+  }
+  GLsizei getIndexCount() const {
+    return indexCount;
+  }
+  const GLfloat* getVertexData() const {
+    return vertexData.get();
+  }
+  const GLuint* getFaces() const {
+    return faces.get();
+  }
+  const GLfloat* getModelMatrix() const {
+    return modelMatrix.get();
+  }
+  private:
+  std::string name;
+  vec3 position;
+  vec3 scale;
+  GLsizei vertexByteCount;
+  GLsizei indexByteCount;
+  GLsizei indexCount;
+  std::unique_ptr<GLfloat[]> vertexData;
+  std::unique_ptr<GLuint[]> faces;
+  std::unique_ptr<GLfloat[]> modelMatrix;
+};
+
+typedef std::vector<std::shared_ptr<Model3D> > ModelList;
+
 class Test3DLayer : public mbgl::style::CustomLayerHost {
 public:
+    Test3DLayer(const ModelList& modelList)
+    : modelList(modelList)
+    {
+    }
     void initialize() override {
         program = MBGL_CHECK_ERROR(glCreateProgram());
         vertexShader = MBGL_CHECK_ERROR(glCreateShader(GL_VERTEX_SHADER));
@@ -91,26 +203,6 @@ public:
     }
 
     void render(const mbgl::style::CustomLayerRenderParameters& param) override {
-        GLfloat vertexData[] = {
-          -0.5, -0.5, 0.5, 0, 0, 1.0,
-          -0.5, 0.5, 0.5, 0, 0, 1.0,
-          0.5, -0.5, 0.5, 0, 0, 1.0,
-          0.5, 0.5, 0.5, 0, 0, 1.0,
-          -0.5, -0.5, -0.5, -1.0, 0, 0,
-          -0.5, -0.5, 0.5, -1.0, 0, 0,
-          -0.5, 0.5, -0.5, -1.0, 0, 0,
-          -0.5, 0.5, 0.5, -1.0, 0, 0,
-          0.5, -0.5, -0.5, 1.0, 0, 0,
-          0.5, -0.5, 0.5, 1.0, 0, 0,
-          0.5, 0.5, -0.5, 1.0, 0, 0,
-          0.5, 0.5, 0.5, 1.0, 0, 0,
-          -0.5, 0.5, -0.5, 0, 1.0, 0,
-          -0.5, 0.5, 0.5, 0, 1.0, 0,
-          0.5, 0.5, -0.5, 0, 1.0, 0,
-          0.5, 0.5, 0.5, 0, 1.0, 0
-        };
-        GLuint faces[] = {0, 1, 2, 1, 2, 3, 4, 5, 6, 5, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13, 14, 13, 14, 15};
-        GLsizei indexCount = sizeof(faces) / sizeof(GLuint);
         // convert the double precision matrix to GLfloats
         // it's called projection, but I think it's the ProjView (P*V) matrix, because
         // the last column appears translated: [-521467, 347073, 67456.5, 67178.1]
@@ -118,36 +210,30 @@ public:
         for (int i = 0; i < 16; i++) {
           pmatrix[i] = static_cast<GLfloat>(param.projectionMatrix[i]);
         }
-        dumpMatrix("projectionMatrix", pmatrix);
-        GLfloat scale[] {1, 1, 10};
-        GLfloat mmatrix[] = {
-          scale[0], 0, 0, 0,
-          0, scale[1], 0, 0,
-          0, 0, scale[2], 0,
-          37.8, -122.5, 0, 1
-        };
-        dumpMatrix("model matrix", mmatrix);
+        dumpMatrix("projectionMatrix", pmatrix);        
         MBGL_CHECK_ERROR(glUseProgram(program));
         MBGL_CHECK_ERROR(glEnable(GL_DEPTH_TEST));
         MBGL_CHECK_ERROR(glDisable(GL_CULL_FACE)); // for the time being, render back faces as well
         MBGL_CHECK_ERROR(glDisable(GL_STENCIL_TEST));
         MBGL_CHECK_ERROR(glDisable(GL_BLEND));
         MBGL_CHECK_ERROR(glUniformMatrix4fv(u_projectionMatrix, 1, false, pmatrix));
-        MBGL_CHECK_ERROR(glUniformMatrix4fv(u_modelMatrix, 1, false, mmatrix));
-        // and here we could loop if we had more meshes
-        MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
-        std::cout << "vertexDataSize: " << sizeof(vertexData) << ", indexBuffer: " << sizeof(faces) << ", indexCount: " << indexCount << std::endl;
-        MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, sizeof(vertexData), vertexData, GL_STATIC_DRAW));
-        MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer));
-        MBGL_CHECK_ERROR(glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(faces), faces, GL_STATIC_DRAW));
-        // unsure why I have to setup the attributes after binding the buffers...
-        // if I set them before binding, nothing is drawn...
-        MBGL_CHECK_ERROR(glEnableVertexAttribArray(a_position));
-        MBGL_CHECK_ERROR(glEnableVertexAttribArray(a_normal));
-        MBGL_CHECK_ERROR(glVertexAttribPointer(a_position, 3, GL_FLOAT, GL_FALSE, stride, nullptr));
-        MBGL_CHECK_ERROR(glVertexAttribPointer(a_normal, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(3 * sizeof(GLfloat))));
-        // draw
-        MBGL_CHECK_ERROR(glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, nullptr));
+        for (const auto& model : modelList) {
+          std::cout << "rendering " << model->getName() << "..." << std::endl;
+          dumpMatrix("model matrix", model->getModelMatrix());
+          MBGL_CHECK_ERROR(glUniformMatrix4fv(u_modelMatrix, 1, false, model->getModelMatrix()));
+          MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
+          MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, model->getVertexByteCount(), model->getVertexData(), GL_STATIC_DRAW));
+          MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer));
+          MBGL_CHECK_ERROR(glBufferData(GL_ELEMENT_ARRAY_BUFFER, model->getIndexByteCount(), model->getFaces(), GL_STATIC_DRAW));
+          // unsure why I have to setup the attributes after binding the buffers...
+          // if I set them before binding, nothing is drawn...
+          MBGL_CHECK_ERROR(glEnableVertexAttribArray(a_position));
+          MBGL_CHECK_ERROR(glEnableVertexAttribArray(a_normal));
+          MBGL_CHECK_ERROR(glVertexAttribPointer(a_position, 3, GL_FLOAT, GL_FALSE, stride, nullptr));
+          MBGL_CHECK_ERROR(glVertexAttribPointer(a_normal, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(3 * sizeof(GLfloat))));
+           // draw
+          MBGL_CHECK_ERROR(glDrawElements(GL_TRIANGLES, model->getIndexCount(), GL_UNSIGNED_INT, nullptr));
+        }
         debugDepthBuffer();
     }
 
@@ -165,6 +251,7 @@ public:
             }
     }
 
+    const ModelList& modelList;
     GLuint program = 0;
     GLuint vertexShader = 0;
     GLuint fragmentShader = 0;
@@ -192,6 +279,10 @@ TEST(CustomLayer, Object) {
     }
 
     util::RunLoop loop;
+
+    ModelList modelList;
+    modelList.push_back(std::make_shared<Model3D>(util::read_file("test/fixtures/resources/cube_endavid.json")));
+    ASSERT_EQ("cube", modelList[0]->getName());
 
     HeadlessFrontend frontend { 1 };
     auto size = frontend.getSize();
@@ -229,7 +320,7 @@ TEST(CustomLayer, Object) {
 
     map.getStyle().addLayer(std::make_unique<CustomLayer>(
         "custom",
-        std::make_unique<Test3DLayer>()));
+        std::make_unique<Test3DLayer>(modelList)));
 
     auto layer = std::make_unique<FillLayer>("landcover", "mapbox");
     layer->setSourceLayer("landcover");
