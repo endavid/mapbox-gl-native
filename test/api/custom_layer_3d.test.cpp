@@ -44,7 +44,7 @@ void main() {
 static const GLchar* fragmentShaderSource = R"MBGL_SHADER(
 varying vec4 vertexColor;
 void main() {
-    gl_FragColor = vec4(vertexColor.rgb, 0.8);
+    gl_FragColor = vec4(vertexColor.rgb, 1.0);
 }
 )MBGL_SHADER";
 
@@ -213,10 +213,13 @@ public:
         dumpMatrix("projectionMatrix", pmatrix);        
         MBGL_CHECK_ERROR(glUseProgram(program));
         MBGL_CHECK_ERROR(glEnable(GL_DEPTH_TEST));
-        MBGL_CHECK_ERROR(glDisable(GL_CULL_FACE)); // for the time being, render back faces as well
+        MBGL_CHECK_ERROR(glDepthMask(true));
+        MBGL_CHECK_ERROR(glDepthFunc(GL_LESS));
+        MBGL_CHECK_ERROR(glEnable(GL_CULL_FACE));
         MBGL_CHECK_ERROR(glDisable(GL_STENCIL_TEST));
         MBGL_CHECK_ERROR(glDisable(GL_BLEND));
         MBGL_CHECK_ERROR(glUniformMatrix4fv(u_projectionMatrix, 1, false, pmatrix));
+        demoProjectionView();
         for (const auto& model : modelList) {
           std::cout << "rendering " << model->getName() << "..." << std::endl;
           dumpMatrix("model matrix", model->getModelMatrix());
@@ -235,6 +238,18 @@ public:
           MBGL_CHECK_ERROR(glDrawElements(GL_TRIANGLES, model->getIndexCount(), GL_UNSIGNED_INT, nullptr));
         }
         debugDepthBuffer();
+    }
+
+    void demoProjectionView() {
+      // P = [4.181371346338361, 0, 0, 0; 0, 2.7875808975589074, 0, 0; 0, 0, -1.0004000800160033, -1; 0, 0, -0.20004000800160032, 0]
+      // V = [0.8290375725550417, -0.12579103321735163, 0.5448608255822355, 0; -5.551115123125783e-17, 0.9743700647852352, 0.22495105434386506, 0; -0.5591929034707469, -0.1864928760369351, 0.8077893932798501, 0; -8.881784197001252e-16, 0.30077041386817926, -10.193602756540082, 1]
+      GLfloat pv[] = {
+        3.4665e+00,  -3.5065e-01, -5.4508e-01,  -5.4486e-01,
+        -2.3211e-16,  2.7161e+00,  -2.2504e-01,  -2.2495e-01,
+        -2.3382e+00,  -5.1986e-01,  -8.0811e-01,  -8.0779e-01,
+        -3.7138e-15,   8.3842e-01,   9.9976e+00,   1.0194e+01
+      };
+      MBGL_CHECK_ERROR(glUniformMatrix4fv(u_projectionMatrix, 1, false, pv));
     }
 
     void contextLost() override {}
@@ -321,11 +336,6 @@ TEST(CustomLayer, Object) {
     map.getStyle().addLayer(std::make_unique<CustomLayer>(
         "custom",
         std::make_unique<Test3DLayer>(modelList)));
-
-    auto layer = std::make_unique<FillLayer>("landcover", "mapbox");
-    layer->setSourceLayer("landcover");
-    layer->setFillColor(Color{ 1.0, 1.0, 0.0, 1.0 });
-    map.getStyle().addLayer(std::move(layer));
 
     test::checkImage("test/fixtures/custom_layer/3d", frontend.render(map).image, 0.0006, 0.1);
 }
