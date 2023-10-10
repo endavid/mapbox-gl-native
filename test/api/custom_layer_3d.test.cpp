@@ -23,7 +23,7 @@ using namespace mbgl;
 using namespace mbgl::style;
 using namespace mbgl::platform;
 
-
+namespace {
 // Note that custom layers need to draw geometry with a z value of 1 to take advantage of
 // depth-based fragment culling.
 static const GLchar* vertexShaderSource = R"MBGL_SHADER(
@@ -69,6 +69,35 @@ void debugDepthBuffer() {
   std::cout << "depth buffer avg: " << sum << std::endl;
 }
 
+double mercatorXfromLng(double lng) {
+    return (180.0 + lng) / 360.0;
+}
+
+double mercatorYfromLat(double lat) {
+    return (180.0 - (180.0 / M_PI * std::log(std::tan(M_PI_4 + lat * M_PI / 360.0)))) / 360.0;
+}
+
+vec3 toMercator(const LatLng& location, double altitudeMeters, double zoom) {
+    const double pixelsPerMeter = 1.0 / Projection::getMetersPerPixelAtLatitude(location.latitude(), 0.0);
+    const double worldSize = Projection::worldSize(std::pow(2.0, zoom));
+
+    return {{mercatorXfromLng(location.longitude()),
+             mercatorYfromLat(location.latitude()),
+             altitudeMeters * pixelsPerMeter / worldSize}};
+}
+
+} // anonymous namespace
+
+template<typename T, size_t N>
+std::ostream& operator<<(std::ostream& os, const std::array<T, N>& arr) {
+    os << "[ ";
+    for(const auto& element : arr) {
+        os << element << ", ";
+    }
+    os << "]";
+    return os;
+}
+
 template<typename T>
 std::unique_ptr<T[]> make_unique_array(std::initializer_list<T> values) {
     auto result = std::make_unique<T[]>(values.size());
@@ -87,7 +116,6 @@ class Model3D {
   , indexCount(0)
   , vertexData(nullptr)
   , faces(nullptr)
-  , modelMatrix(nullptr)
   {
     rapidjson::GenericDocument<rapidjson::UTF8<>, rapidjson::CrtAllocator> doc;
     doc.Parse<0>(json.c_str());
@@ -110,15 +138,6 @@ class Model3D {
       position[i] = pos[i].GetDouble();
       scale[i] = s[i].GetDouble();
     }
-    modelMatrix = make_unique_array<GLfloat>({
-      static_cast<GLfloat>(scale[0]), 0, 0, 0,
-      0, static_cast<GLfloat>(scale[0]), 0, 0,
-      0, 0, static_cast<GLfloat>(scale[0]), 0,
-      static_cast<GLfloat>(position[0]),
-      static_cast<GLfloat>(position[1]),
-      static_cast<GLfloat>(position[2]),
-      1
-    });
     size_t vertexCount = positionArray.Size() / 3;
     vertexData = std::make_unique<GLfloat[]>(6 * vertexCount);
     vertexByteCount = sizeof(GLfloat) * 6 * vertexCount;
@@ -156,8 +175,11 @@ class Model3D {
   const GLuint* getFaces() const {
     return faces.get();
   }
-  const GLfloat* getModelMatrix() const {
-    return modelMatrix.get();
+  const vec3& getScale() const {
+    return scale;
+  }
+  const vec3& getPosition() const {
+    return position;
   }
   private:
   std::string name;
@@ -168,7 +190,6 @@ class Model3D {
   GLsizei indexCount;
   std::unique_ptr<GLfloat[]> vertexData;
   std::unique_ptr<GLuint[]> faces;
-  std::unique_ptr<GLfloat[]> modelMatrix;
 };
 
 typedef std::vector<std::shared_ptr<Model3D> > ModelList;
@@ -210,7 +231,9 @@ public:
         for (int i = 0; i < 16; i++) {
           pmatrix[i] = static_cast<GLfloat>(param.projectionMatrix[i]);
         }
-        dumpMatrix("projectionMatrix", pmatrix);        
+        dumpMatrix("projectionMatrix", pmatrix);
+        double worldSize = Projection::worldSize(std::pow(2, param.zoom));
+        std::cout << "worldSize: " << worldSize << std::endl;
         MBGL_CHECK_ERROR(glUseProgram(program));
         MBGL_CHECK_ERROR(glEnable(GL_DEPTH_TEST));
         MBGL_CHECK_ERROR(glDepthMask(true));
@@ -219,11 +242,28 @@ public:
         MBGL_CHECK_ERROR(glDisable(GL_STENCIL_TEST));
         MBGL_CHECK_ERROR(glDisable(GL_BLEND));
         MBGL_CHECK_ERROR(glUniformMatrix4fv(u_projectionMatrix, 1, false, pmatrix));
-        demoProjectionView();
+        //demoProjectionView();
         for (const auto& model : modelList) {
           std::cout << "rendering " << model->getName() << "..." << std::endl;
-          dumpMatrix("model matrix", model->getModelMatrix());
-          MBGL_CHECK_ERROR(glUniformMatrix4fv(u_modelMatrix, 1, false, model->getModelMatrix()));
+          auto scale = model->getScale();
+          auto position = model->getPosition();
+          LatLng ll(position[0], position[1]);
+          double altitude = position[2];
+          double mpp = Projection::getMetersPerPixelAtLatitude(ll.latitude(), param.zoom);
+          double meterInMercatorUnits = 1.0 / mpp;
+          vec3 s({scale[0] * meterInMercatorUnits, scale[1] * meterInMercatorUnits, scale[2] * meterInMercatorUnits});
+          vec3 p = toMercator(ll, altitude, param.zoom);
+          GLfloat modelMatrix[] = {
+            static_cast<GLfloat>(s[0]), 0, 0, 0,
+            0, static_cast<GLfloat>(s[1]), 0, 0,
+            0, 0, static_cast<GLfloat>(s[2]), 0,
+            static_cast<GLfloat>(p[0] * worldSize),
+            static_cast<GLfloat>(p[1] * worldSize),
+            static_cast<GLfloat>(p[2] * worldSize),
+            1
+          };
+          dumpMatrix("model matrix", modelMatrix);
+          MBGL_CHECK_ERROR(glUniformMatrix4fv(u_modelMatrix, 1, false, modelMatrix));
           MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
           MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, model->getVertexByteCount(), model->getVertexData(), GL_STATIC_DRAW));
           MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer));
@@ -308,7 +348,8 @@ TEST(CustomLayer, Object) {
             ResourceOptions().withCachePath(":memory:").withAssetPath("test/fixtures/api/assets"));
     map.getStyle().loadJSON(util::read_file("test/fixtures/api/water.json"));
     LatLng ll(37.8, -122.5);
-    auto cam = CameraOptions().withCenter(ll).withZoom(10.0).withPitch(30).withBearing(30);
+    double zoom = 10;
+    auto cam = CameraOptions().withCenter(ll).withZoom(zoom).withPitch(30).withBearing(30);
 
     // Understanding transforms
     Transform transform;
@@ -328,10 +369,9 @@ TEST(CustomLayer, Object) {
     std::array<float, 3> spherical{{ 2, 37.8, -122.5 }};
     Position position(spherical);
     auto cartesian = position.getCartesian();
-    std::cout << "cartesian: " << cartesian[0] << ", " << cartesian[1] << ", " << cartesian[2] << std::endl;
-    //auto merca = util::toMercator(ll, 10.0);
-    //std::cout << "mercator: " << merca[0] << ", " << merca[1] << ", " << merca[2] << std::endl;
-    //  0.159722, 0.382893, 3.20185e-07
+    std::cout << "cartesian: " << cartesian << std::endl;
+    auto merca = toMercator(ll, 0.0, zoom);
+    std::cout << merca << std::endl;
 
     map.getStyle().addLayer(std::make_unique<CustomLayer>(
         "custom",
