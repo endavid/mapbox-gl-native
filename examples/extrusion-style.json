@@ -1,0 +1,85 @@
+{
+  "version": 8,
+  "name": "Basic Map",
+  "metadata": {},
+  "center": [2.187, 41.388],
+  "zoom": 15.4,
+  "sources": {
+    "mapbox-streets": {
+      "type": "vector",
+      "url": "mapbox://mapbox.mapbox-streets-v8"
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#f3f3f3"
+      }
+    },
+    {
+      "id": "water",
+      "source": "mapbox-streets",
+      "source-layer": "water",
+      "type": "fill",
+      "paint": {
+        "fill-color": "#b4d4e8"
+      }
+    },
+    {
+      "id": "roads",
+      "source": "mapbox-streets",
+      "source-layer": "road",
+      "type": "line",
+      "paint": {
+        "line-color": "#ffffff",
+        "line-width": {
+          "base": 1.2,
+          "stops": [
+            [12, 0.5],
+            [20, 10]
+          ]
+        }
+      }
+    },
+    {
+      "id": "labels",
+      "source": "mapbox-streets",
+      "source-layer": "road_label",
+      "type": "symbol",
+      "layout": {
+        "text-field": "{name_en}",
+        "text-size": {
+          "base": 1.2,
+          "stops": [
+            [12, 10],
+            [20, 16]
+          ]
+        }
+      },
+      "paint": {
+        "text-color": "#000000"
+      }
+    },
+    {
+      "id": "3d-buildings",
+      "source": "mapbox-streets",
+      "source-layer": "building",
+      "type": "fill-extrusion",
+      "minzoom": 15,
+      "paint": {
+        "fill-extrusion-color": "#aaaaaa",
+        "fill-extrusion-height": {
+          "type": "identity",
+          "property": "height"
+        },
+        "fill-extrusion-base": {
+          "type": "identity",
+          "property": "min_height"
+        },
+        "fill-extrusion-opacity": 0.6
+      }
+    }
+  ]
+}

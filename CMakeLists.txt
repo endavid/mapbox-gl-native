@@ -885,6 +885,8 @@ if(MBGL_WITH_OPENGL)
             ${PROJECT_SOURCE_DIR}/src/mbgl/gl/vertex_array_extension.hpp
             ${PROJECT_SOURCE_DIR}/src/mbgl/gl/vertex_buffer_resource.cpp
             ${PROJECT_SOURCE_DIR}/src/mbgl/gl/vertex_buffer_resource.hpp
+            ${PROJECT_SOURCE_DIR}/src/mbgl/gl/custom/custom_layer_model3d.hpp
+            ${PROJECT_SOURCE_DIR}/src/mbgl/gl/custom/custom_layer_model3d.cpp
             ${PROJECT_SOURCE_DIR}/src/mbgl/layermanager/location_indicator_layer_factory.cpp
             ${PROJECT_SOURCE_DIR}/src/mbgl/platform/gl_functions.cpp
             ${PROJECT_SOURCE_DIR}/src/mbgl/programs/gl/background.cpp
