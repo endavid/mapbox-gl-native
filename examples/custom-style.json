@@ -65,7 +65,15 @@
     {
       "id": "custom-layer",
       "type": "custom",
-      "customLayer": "model3d"
+      "customLayer": "model3d",
+      "models": [
+        {
+          "id": "cube",
+          "position": [41.388, 2.187, 0],
+          "scale": [100, 150, 400],
+          "url": "file:///Users/david/dev/mapbox-gl-native/test/fixtures/resources/cube_endavid.json"
+        }
+      ]
     }
   ]
 }

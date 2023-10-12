@@ -1,10 +1,21 @@
 #include <mbgl/gl/custom/custom_layer_model3d.hpp>
+#include <iostream>
 
 using namespace mbgl;
 using namespace mbgl::style;
 using namespace mbgl::platform;
 
 namespace {
+
+template<typename T, size_t N>
+std::ostream& operator<<(std::ostream& os, const std::array<T, N>& arr) {
+    os << "[ ";
+    for(const auto& element : arr) {
+        os << element << ", ";
+    }
+    os << "]";
+    return os;
+}
 
 static const GLchar* vertexShaderSource = R"MBGL_SHADER(
 attribute vec2 a_pos;
@@ -21,8 +32,11 @@ void main() {
 
 } // anonymous
 
-Model3DLayer::Model3DLayer()
+Model3DLayer::Model3DLayer(const std::vector<ModelDescriptor>& modelList)
 {
+  for (const auto& m : modelList) {
+    std::cout << m.id << ": position " << m.position << ", scale " << m.scale << ", " << m.url << std::endl;
+  }
 }
 
 void Model3DLayer::initialize() {
