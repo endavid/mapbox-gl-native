@@ -68,10 +68,22 @@
       "customLayer": "model3d",
       "models": [
         {
-          "id": "cube",
+          "id": "block",
           "position": [41.388, 2.187, 0],
           "scale": [100, 150, 400],
           "url": "file:///Users/david/dev/mapbox-gl-native/test/fixtures/resources/cube_endavid.json"
+        },
+        {
+          "id": "tree01",
+          "position": [41.388966, 2.182626, 0],
+          "scale": [10, 10, 10],
+          "url": "file:///Users/david/dev/mapbox-gl-native/test/fixtures/resources/tree_endavid.json"
+        },
+        {
+          "id": "tree02",
+          "position": [41.389419, 2.183569, 0],
+          "scale": [10, 10, 10],
+          "url": "file:///Users/david/dev/mapbox-gl-native/test/fixtures/resources/tree_endavid.json"
         }
       ]
     }
