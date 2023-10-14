@@ -70,7 +70,7 @@
         {
           "id": "block",
           "position": [41.388, 2.187, 0],
-          "scale": [100, 150, 400],
+          "scale": [10, 15, 40],
           "url": "file:///Users/david/dev/mapbox-gl-native/test/fixtures/resources/cube_endavid.json"
         },
         {

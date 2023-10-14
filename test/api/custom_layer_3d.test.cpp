@@ -33,7 +33,8 @@ uniform mat4 modelMatrix;
 uniform mat4 projectionMatrix;
 varying vec4 vertexColor;
 void main() {
-    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+    // Y is up in my models, but Z is up in mapbox -> xzy
+    vec4 worldPos = modelMatrix * vec4(position.xzy, 1.0);
     vec4 projected = projectionMatrix * worldPos;
     gl_Position = projected;
     //gl_Position = vec4(worldPos.xy, 1, 1);
@@ -239,6 +240,8 @@ public:
         MBGL_CHECK_ERROR(glDepthMask(true));
         MBGL_CHECK_ERROR(glDepthFunc(GL_LESS));
         MBGL_CHECK_ERROR(glEnable(GL_CULL_FACE));
+        // CCW for xzy order (CW if it were xyz)
+        MBGL_CHECK_ERROR(glFrontFace(GL_CCW));
         MBGL_CHECK_ERROR(glDisable(GL_STENCIL_TEST));
         MBGL_CHECK_ERROR(glDisable(GL_BLEND));
         MBGL_CHECK_ERROR(glUniformMatrix4fv(u_projectionMatrix, 1, false, pmatrix));
@@ -251,7 +254,7 @@ public:
           double altitude = position[2];
           double mpp = Projection::getMetersPerPixelAtLatitude(ll.latitude(), param.zoom);
           double meterInMercatorUnits = 1.0 / mpp;
-          vec3 s({scale[0] * meterInMercatorUnits, scale[1] * meterInMercatorUnits, scale[2] * meterInMercatorUnits});
+          vec3 s({scale[0] * meterInMercatorUnits, scale[1] * meterInMercatorUnits, scale[2]});
           vec3 p = toMercator(ll, altitude, param.zoom);
           GLfloat modelMatrix[] = {
             static_cast<GLfloat>(s[0]), 0, 0, 0,

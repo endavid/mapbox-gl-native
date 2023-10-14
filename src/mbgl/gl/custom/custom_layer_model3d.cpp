@@ -264,7 +264,7 @@ mbgl::style::CustomLayerRenderParameters& param) {
     }
     double mpp = Projection::getMetersPerPixelAtLatitude(ll.latitude(), param.zoom);
     double meterInMercatorUnits = 1.0 / mpp;
-    vec3 s({m.scale[0] * meterInMercatorUnits, m.scale[1] * meterInMercatorUnits, m.scale[2] * meterInMercatorUnits});
+    vec3 s({m.scale[0] * meterInMercatorUnits, m.scale[1] * meterInMercatorUnits, m.scale[2]});
     GLfloat modelMatrix[] = {
       static_cast<GLfloat>(s[0]), 0, 0, 0,
       0, static_cast<GLfloat>(s[1]), 0, 0,
