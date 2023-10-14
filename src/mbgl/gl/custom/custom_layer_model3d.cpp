@@ -53,14 +53,25 @@ vec4 multiply(const std::array<double, 16>& m, const vec3& p) {
   });
 }
 
-std::string readResource(const std::string& url) {
+/// returns true when read immediately (a file)
+bool readResource(const std::string& url, std::function<void(std::string)> callback) {
   if (url.compare(0, 7, "file://") == 0) {
     std::string filename(url);
     filename.erase(0, 7);
-    return util::read_file(filename);
+    auto json = util::read_file(filename);
+    callback(json);
+    return true;
   }
-  std::cerr << "Reading models from the network is still not supported: " << url << std::endl;
-  return "";
+  HTTPFileSource fs;
+  fs.request({ Resource::Unknown, url }, [&](Response res) {
+    if (res.error) {
+      std::cerr << "Error reading " << url << std::endl;
+      callback("");
+    } else {
+      callback(*res.data);
+    }
+  });
+  return false;
 }
 
 static const GLchar* vertexShaderSource = R"MBGL_SHADER(
@@ -168,17 +179,6 @@ Model3DLayer::Model3DLayer(const std::vector<ModelDescriptor>& modelList)
 : modelList(std::move(modelList))
 , models()
 {
-  for (const auto& m : modelList) {
-    std::string url(m.url);
-    if (url.compare(0, 7, "file://") == 0) {
-      url.erase(0, 7);
-      std::string json = util::read_file(url);
-      std::cout << json << std::endl;
-    } else {
-      std::cerr << "Reading models from the network is still not supported: " << url << std::endl;
-    }
-    std::cout << m.id << ": position " << m.position << ", scale " << m.scale << ", " << m.url << std::endl;
-  }
 }
 
 void Model3DLayer::initialize() {
@@ -208,17 +208,20 @@ std::shared_ptr<Model3D> Model3DLayer::getCachedModel(const std::string& url) {
   auto it = models.find(url);
   if (it == models.end()) {
     // the first time the model becomes visible, we load it
-    std::string json = readResource(url);
-    if (json.empty()) {
-      std::cerr << "Empty JSON: " << url << std::endl;
+    bool isRead = readResource(url, [&](std::string json) {
+      if (json.empty()) {
+        std::cerr << "Empty JSON: " << url << std::endl;
+        models.emplace(url, nullptr);
+      } else {
+        models.emplace(url, std::make_shared<Model3D>(json));
+      }
+    });
+    if (isRead) {
+      it = models.find(url);
+    }
+    if (it == models.end()) {
       return nullptr;
     }
-    auto itm = models.emplace(url, std::make_shared<Model3D>(json));
-    if (itm.second) {
-      return itm.first->second;
-    }
-    std::cerr << "Insertion failed: " << url << std::endl;
-    return nullptr;
   }
   // the model was read already
   return it->second;

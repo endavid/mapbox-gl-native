@@ -84,6 +84,12 @@
           "position": [41.389419, 2.183569, 0],
           "scale": [10, 10, 10],
           "url": "file:///Users/david/dev/mapbox-gl-native/test/fixtures/resources/tree_endavid.json"
+        },
+        {
+          "id": "orange",
+          "position": [41.389821, 2.184571, 0],
+          "scale": [10, 10, 10],
+          "url": "http://endavid.com/webGL-modelViewer/html/resources/orange.json"
         }
       ]
     }
