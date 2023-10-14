@@ -25,11 +25,12 @@ public:
   void contextLost() override;
   void deinitialize() override;
 private:
-    GLuint program = 0;
-    GLuint vertexShader = 0;
-    GLuint fragmentShader = 0;
-    GLuint buffer = 0;
-    GLuint a_pos = 0;
+  std::vector<ModelDescriptor> modelList;
+  GLuint program = 0;
+  GLuint vertexShader = 0;
+  GLuint fragmentShader = 0;
+  GLuint buffer = 0;
+  GLuint a_pos = 0;
 };
 
 
