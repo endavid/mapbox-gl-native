@@ -2,6 +2,7 @@
 
 #include <mbgl/tile/vector_tile_data.hpp>
 #include <mbgl/util/io.hpp>
+#include <iostream>
 
 using namespace mbgl;
 
@@ -22,6 +23,7 @@ static void Parse_VectorTile(benchmark::State& state) {
                 }
             }
         }
+        std::cout << "length: " << length << std::endl;
     }
 }
 
