@@ -40,8 +40,7 @@ private:
   GLuint a_position = 0;
   GLuint a_normal = 0;
   GLsizei stride = 0;
-  GLint u_projectionMatrix = 0;
-  GLint u_modelMatrix = 0;
+  GLint u_mvpMatrix = 0;
 };
 
 

@@ -5,6 +5,7 @@
 #include <mbgl/storage/resource_options.hpp>
 #include <mbgl/util/projection.hpp>
 #include <mbgl/util/run_loop.hpp>
+#include <mbgl/util/mat4.hpp>
 #include <mbgl/util/io.hpp>
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
@@ -77,13 +78,11 @@ bool readResource(const std::string& url, std::function<void(std::string)> callb
 static const GLchar* vertexShaderSource = R"MBGL_SHADER(
 attribute vec3 position;
 attribute vec3 normal;
-uniform mat4 modelMatrix;
-uniform mat4 projectionMatrix;
+uniform mat4 mvpMatrix;
 varying vec4 vertexColor;
 void main() {
     // Y is up in my models, but Z is up in mapbox -> xzy
-    vec4 worldPos = modelMatrix * vec4(position.xzy, 1.0);
-    vec4 projected = projectionMatrix * worldPos;
+    vec4 projected = mvpMatrix * vec4(position.xzy, 1.0);
     gl_Position = projected;
     //gl_Position = vec4(worldPos.xy, 1, 1);
     vertexColor = vec4(0.5 * normal + 0.5, 1);
@@ -195,8 +194,7 @@ void Model3DLayer::initialize() {
   MBGL_CHECK_ERROR(glLinkProgram(program));
   a_position = MBGL_CHECK_ERROR(glGetAttribLocation(program, "position"));
   a_normal = MBGL_CHECK_ERROR(glGetAttribLocation(program, "normal"));
-  u_projectionMatrix = MBGL_CHECK_ERROR(glGetUniformLocation(program, "projectionMatrix"));
-  u_modelMatrix = MBGL_CHECK_ERROR(glGetUniformLocation(program, "modelMatrix"));
+  u_mvpMatrix = MBGL_CHECK_ERROR(glGetUniformLocation(program, "mvpMatrix"));
   stride = 6 * sizeof(GLfloat); // position + normal
   GLuint buffers[2];
   MBGL_CHECK_ERROR(glGenBuffers(2, buffers));
@@ -229,10 +227,6 @@ std::shared_ptr<Model3D> Model3DLayer::getCachedModel(const std::string& url) {
   
 void Model3DLayer::render(const 
 mbgl::style::CustomLayerRenderParameters& param) {
-  GLfloat pmatrix[16];
-  for (int i = 0; i < 16; i++) {
-    pmatrix[i] = static_cast<GLfloat>(param.projectionMatrix[i]);
-  }
   double worldSize = Projection::worldSize(std::pow(2, param.zoom));
   MBGL_CHECK_ERROR(glUseProgram(program));
   MBGL_CHECK_ERROR(glEnable(GL_DEPTH_TEST));
@@ -243,7 +237,6 @@ mbgl::style::CustomLayerRenderParameters& param) {
   MBGL_CHECK_ERROR(glFrontFace(GL_CCW));
   MBGL_CHECK_ERROR(glDisable(GL_STENCIL_TEST));
   MBGL_CHECK_ERROR(glDisable(GL_BLEND));
-  MBGL_CHECK_ERROR(glUniformMatrix4fv(u_projectionMatrix, 1, false, pmatrix));
   for (const auto& m : modelList) {
     LatLng ll(m.position[0], m.position[1]);
     double altitude = m.position[2];
@@ -268,16 +261,19 @@ mbgl::style::CustomLayerRenderParameters& param) {
     double mpp = Projection::getMetersPerPixelAtLatitude(ll.latitude(), param.zoom);
     double meterInMercatorUnits = 1.0 / mpp;
     vec3 s({m.scale[0] * meterInMercatorUnits, m.scale[1] * meterInMercatorUnits, m.scale[2]});
-    GLfloat modelMatrix[] = {
-      static_cast<GLfloat>(s[0]), 0, 0, 0,
-      0, static_cast<GLfloat>(s[1]), 0, 0,
-      0, 0, static_cast<GLfloat>(s[2]), 0,
-      static_cast<GLfloat>(p[0]),
-      static_cast<GLfloat>(p[1]),
-      static_cast<GLfloat>(p[2]),
-      1
+    mat4 mvp;
+    mat4 modelM = {
+      s[0], 0, 0, 0,
+      0, s[1], 0, 0,
+      0, 0, s[2], 0,
+      p[0], p[1], p[2], 1
     };
-    MBGL_CHECK_ERROR(glUniformMatrix4fv(u_modelMatrix, 1, false, modelMatrix));
+    matrix::multiply(mvp, param.projectionMatrix, modelM);
+    GLfloat mvpMatrix[16];
+    for (int i = 0; i < 16; i++) {
+      mvpMatrix[i] = static_cast<GLfloat>(mvp[i]);
+    }
+    MBGL_CHECK_ERROR(glUniformMatrix4fv(u_mvpMatrix, 1, false, mvpMatrix));
     MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer));
     MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, model->getVertexByteCount(), model->getVertexData(), GL_STATIC_DRAW));
     MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer));

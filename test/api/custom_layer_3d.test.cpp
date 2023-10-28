@@ -23,6 +23,8 @@ using namespace mbgl;
 using namespace mbgl::style;
 using namespace mbgl::platform;
 
+#define GL_VERSION 0x1F02
+
 namespace {
 // Note that custom layers need to draw geometry with a z value of 1 to take advantage of
 // depth-based fragment culling.
@@ -202,6 +204,8 @@ public:
     {
     }
     void initialize() override {
+        const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        std::cout << "OpenGL Version: " << version << std::endl;
         program = MBGL_CHECK_ERROR(glCreateProgram());
         vertexShader = MBGL_CHECK_ERROR(glCreateShader(GL_VERTEX_SHADER));
         fragmentShader = MBGL_CHECK_ERROR(glCreateShader(GL_FRAGMENT_SHADER));
